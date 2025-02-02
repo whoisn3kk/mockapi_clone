@@ -2,7 +2,7 @@ from django.forms import model_to_dict
 from django.shortcuts import get_object_or_404, render
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import generics
+from rest_framework import generics, status
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
@@ -11,6 +11,56 @@ from .models import *
 
 # Create your views here.
 
+class NewEndpointLCApiView(generics.ListCreateAPIView):
+    queryset = Endpoint.objects.all()
+    serializer_class = EndpointCreateUpdateSerializer
+
+    def get_queryset(self):
+        queryset = Endpoint.objects.filter(user__uuid=self.kwargs.get("uuid"))
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        user = kwargs.get("uuid")
+        user = Users.objects.filter(uuid=user).first()
+        if not user:
+            return Response({"error": "User matching query does not exist."}, status=status.HTTP_404_NOT_FOUND)
+        
+        dct = {
+            "key": request.data.get("key"),
+            "value": request.data.get("value"),
+            "user": user.id
+        }
+
+        try:
+            dct["value"] = json.loads(dct["value"])
+        except:
+            return Response({"error": "Provided data is not valid json"}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = EndpointSerializer(data=dct)
+        serializer.is_valid()
+        if Endpoint.objects.filter(key=serializer.data.get("key")):
+            return Response({"error": "This key already exists. Use PUT(PATCH) to modify it."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.create(serializer.validated_data)
+        serializer = EndpointCreateUpdateSerializer(data=dct)
+        serializer.is_valid()
+
+        return Response(serializer.data)
+
+class NewEndpointRUDApiView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Endpoint.objects.all()
+    serializer_class = EndpointValueUpdateSerializer
+    lookup_field = "key"
+
+    def get(self, request, *args, **kwargs):
+        ep = Endpoint.objects.filter(key=kwargs.get("key")).first()
+        if not ep:
+            return Response({"error": "Endpoint matching query does not exist."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ep.value)
+    
+    def update(self, request, *args, **kwargs):
+        super().update(request, *args, **kwargs)
+        ep = Endpoint.objects.filter(key=kwargs.get("key")).first()
+        return Response(ep.value)
 
 class UserView(APIView):
     @swagger_auto_schema(
